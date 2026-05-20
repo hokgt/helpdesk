@@ -26,6 +26,10 @@ import General from "./General/General.vue";
 import SettingsGear from "~icons/lucide/settings";
 import SavedReplyIcon from "../icons/SavedReplyIcon.vue";
 import ProfilePage from "./Profile/ProfilePage.vue";
+import ChannelSetupPage from "./HelpdeskPlus/ChannelSetupPage.vue";
+import NotificationSettingsPage from "./HelpdeskPlus/NotificationSettingsPage.vue";
+import LucidePlug from "~icons/lucide/plug";
+import LucideBell from "~icons/lucide/bell";
 
 export const showSettingsModal = ref(false);
 
@@ -164,6 +168,23 @@ export const tabs = computed(() => {
           label: __("Saved Replies"),
           icon: markRaw(SavedReplyIcon),
           component: markRaw(SavedReplies),
+        },
+      ],
+    },
+
+    {
+      label: __("Helpdesk Plus"),
+      condition: () => auth.isAdmin || auth.isManager,
+      items: [
+        {
+          label: __("Channel Setup"),
+          icon: markRaw(LucidePlug),
+          component: markRaw(ChannelSetupPage),
+        },
+        {
+          label: __("Notification Settings"),
+          icon: markRaw(LucideBell),
+          component: markRaw(NotificationSettingsPage),
         },
       ],
     },
