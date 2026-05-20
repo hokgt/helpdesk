@@ -26,13 +26,61 @@ import General from "./General/General.vue";
 import SettingsGear from "~icons/lucide/settings";
 import SavedReplyIcon from "../icons/SavedReplyIcon.vue";
 import ProfilePage from "./Profile/ProfilePage.vue";
+import ChannelSetupPage from "./HelpdeskPlus/ChannelSetupPage.vue";
+import NotificationSettingsPage from "./HelpdeskPlus/NotificationSettingsPage.vue";
+import LucidePlug from "~icons/lucide/plug";
+import LucideBell from "~icons/lucide/bell";
 
 export const showSettingsModal = ref(false);
+
+type SettingsTabItem = {
+  label: string;
+  icon?: unknown;
+  component: unknown;
+  condition?: () => boolean;
+};
+
+type SettingsTab = {
+  label: string;
+  hideLabel?: boolean;
+  noborder?: boolean;
+  condition?: () => boolean;
+  items: SettingsTabItem[];
+};
+
+type HelpdeskSettingsTabRegistry = SettingsTab[] | (() => SettingsTab[]);
+
+declare global {
+  interface Window {
+    helpdeskSettingsTabs?: HelpdeskSettingsTabRegistry;
+  }
+}
+
+const getCustomSettingsTabs = (): SettingsTab[] => {
+  const registry = window.helpdeskSettingsTabs;
+  if (!registry) return [];
+
+  const customTabs = typeof registry === "function" ? registry() : registry;
+  if (!Array.isArray(customTabs)) return [];
+
+  return customTabs.map((tab) => ({
+    ...tab,
+    items: (tab.items || []).map((item) => ({
+      ...item,
+      icon:
+        item.icon && typeof item.icon === "object" ? markRaw(item.icon) : item.icon,
+      component:
+        item.component && typeof item.component === "object"
+          ? markRaw(item.component)
+          : item.component,
+    })),
+  }));
+};
 
 const auth = useAuthStore();
 
 export const tabs = computed(() => {
-  const _tabs = [
+  const _tabs: SettingsTab[] = [
     {
       label: __("My settings"),
       hideLabel: true,
@@ -123,6 +171,23 @@ export const tabs = computed(() => {
         },
       ],
     },
+
+    {
+      label: __("Helpdesk Plus"),
+      condition: () => auth.isAdmin || auth.isManager,
+      items: [
+        {
+          label: __("Channel Setup"),
+          icon: markRaw(LucidePlug),
+          component: markRaw(ChannelSetupPage),
+        },
+        {
+          label: __("Notification Settings"),
+          icon: markRaw(LucideBell),
+          component: markRaw(NotificationSettingsPage),
+        },
+      ],
+    },
     {
       label: __("Integrations"),
       items: [
@@ -134,6 +199,8 @@ export const tabs = computed(() => {
       ],
     },
   ];
+
+  _tabs.push(...getCustomSettingsTabs());
 
   return _tabs.filter((tab) => {
     if (tab.condition && !tab.condition()) return false;
@@ -168,7 +235,7 @@ type TabName =
   | "Telephony"
   | "Saved Replies";
 
-export const setActiveSettingsTab = (tabName: TabName) => {
+export const setActiveSettingsTab = (tabName: TabName | string) => {
   activeTab.value =
     (tabName &&
       tabs.value
