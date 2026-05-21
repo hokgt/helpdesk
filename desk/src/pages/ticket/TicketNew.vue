@@ -181,7 +181,38 @@ const { isManager, userId: userID } = useAuthStore();
 const subject = ref("");
 const description = ref("");
 const attachments = ref([]);
-const templateFields = reactive({});
+const templateFields = reactive<Record<string, any>>({});
+
+const TICKET_TYPE_MAP: Record<string, string> = {
+  "Hardware::Printer": "Printer/Peripheral Issue",
+  "Hardware::Networking": "Network Issue",
+  "Hardware::Computer/Laptop": "Hardware Issue",
+  "Hardware::Monitor/Display": "Hardware Issue",
+  "Hardware::Phone/VoIP": "Hardware Issue",
+  "Hardware::UPS/Power": "Hardware Issue",
+  "Hardware::Other Hardware": "Hardware Issue",
+  "Software::ERP": "Software Issue",
+  "Software::Windows OS": "Software Issue",
+  "Software::Mattermost": "Software Issue",
+  "Software::Nextcloud": "Software Issue",
+  "Software::Email": "Email Sync Issue",
+  "Software::ONLYOFFICE": "Software Issue",
+  "Software::Helpdesk": "Software Issue",
+  "Software::Other Software": "Software Issue",
+  "Account/Access::New Account": "Account Provisioning (New Account)",
+  "Account/Access::Delete Account": "Account Deprovisioning (Delete Account)",
+  "Account/Access::Password Reset": "Password Reset",
+  "Account/Access::Permission Change": "Permission Change",
+  "Account/Access::Role Assignment": "Role Assignment",
+  "Account/Access::Licensing": "Licensing",
+  "Infrastructure::Server Down": "Server Down",
+  "Infrastructure::Backup/Restore": "Backup/Restore",
+  "Infrastructure::Disk Space": "Disk Space Warning",
+  "Infrastructure::CPU/Memory": "High CPU / Memory Alert",
+  "Infrastructure::Deployment": "Deployment",
+  "Infrastructure::Database Migration": "Database Migration",
+};
+
 
 const template = createResource({
   url: "helpdesk.helpdesk.doctype.hd_ticket_template.api.get_one",
@@ -230,9 +261,25 @@ function applyFilters(fieldname: string, filters: any = null) {
 
 const customOnChange = computed(() => template.data?._customOnChange);
 
+function selectedSubType() {
+  const category = templateFields["custom_issue_category"] || "";
+  if (category === "Hardware") return templateFields["custom_hardware_type"] || "";
+  if (category === "Software") return templateFields["custom_software_type"] || "";
+  if (category === "Account/Access") return templateFields["custom_account_type"] || "";
+  if (category === "Infrastructure") return templateFields["custom_infra_type"] || "";
+  return "";
+}
+
+function mappedTicketType() {
+  const category = templateFields["custom_issue_category"] || "";
+  const subType = selectedSubType();
+  if (!category || !subType) return "";
+  return TICKET_TYPE_MAP[category + "::" + subType] || "";
+}
+
 const visibleFields = computed(() => {
   let _fields = template.data?.fields?.filter(
-    (f) => !isCustomerPortal.value || !f.hide_from_customer
+    (f) => (!isCustomerPortal.value || !f.hide_from_customer) && f.fieldname !== "ticket_type"
   );
   if (!_fields) return [];
   return _fields.map((field) => parseField(field, templateFields));
@@ -257,6 +304,7 @@ const ticket = createResource({
       subject: subject.value,
       template: props.templateId,
       ...templateFields,
+      ticket_type: mappedTicketType(),
     },
     attachments: attachments.value,
   }),
