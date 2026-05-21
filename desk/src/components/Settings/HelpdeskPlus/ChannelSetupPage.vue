@@ -28,7 +28,7 @@
       <div class="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
         <strong>Workflow:</strong>
         Add Channel → choose WhatsApp, Telegram, or Mattermost → fill identity → Test Channel → Add Channel Record.
-        Bot channels must already be bound in the selected gateway before they can be added.
+        WhatsApp on Hermes can be saved before linking, then linked by generating and scanning a QR code.
       </div>
 
       <div v-if="configuredChannels.length" class="flex flex-col gap-3">
@@ -43,7 +43,9 @@
               <component :is="channelIcon(channel.channel)" class="h-5 w-5" :class="channelIconClass(channel.channel)" />
               <div>
                 <div class="font-medium text-gray-900">{{ channel.channel }}</div>
-                <div class="text-sm text-green-700">Verified: {{ verifiedLabel(channel) }}</div>
+                <div class="text-sm" :class="isVerified(channel) ? 'text-green-700' : 'text-orange-700'">
+                  {{ isVerified(channel) ? 'Verified' : 'Setup pending' }}: {{ verifiedLabel(channel) }}
+                </div>
                 <div v-if="channel.channel === 'WhatsApp'" class="mt-1 text-xs" :class="whatsappLinkClass">
                   Link Status: {{ whatsappLinkLabel }}
                 </div>
@@ -132,7 +134,7 @@
         <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 class="text-base font-semibold text-gray-900">{{ editMode ? 'Edit Channel' : 'Add Channel' }}</h3>
-            <p class="text-xs text-gray-500">Test must pass before this channel can be saved as an active record.</p>
+            <p class="text-xs text-gray-500">Test must pass before saving. WhatsApp Hermes can be saved as pending QR setup before linking.</p>
           </div>
           <button @click="cancelAddChannel" :disabled="isSaving" class="text-sm text-gray-500 hover:text-gray-700">Cancel</button>
         </div>
@@ -245,12 +247,12 @@ function blankDraft() {
   return { channel: "", enabled: false, display_sender_name: "Helpdesk Wijayacorp", gateway_type: "Hermes" };
 }
 
-const configuredChannels = computed(() => channels.value.filter((channel) => isVerified(channel)));
+const configuredChannels = computed(() => channels.value.filter((channel) => isVerified(channel) || isWhatsappHermesSetup(channel)));
 const configuredChannelNames = computed(() => new Set(configuredChannels.value.map((channel) => channel.channel)));
 const availableChannels = computed(() =>
   channels.value.filter((channel) => editMode.value || !configuredChannelNames.value.has(channel.channel))
 );
-const canSaveDraft = computed(() => isVerified(draftChannel.value));
+const canSaveDraft = computed(() => isVerified(draftChannel.value) || isWhatsappHermesDraftReady(draftChannel.value));
 const hasConfiguredWhatsApp = computed(() => configuredChannels.value.some((channel) => channel.channel === "WhatsApp"));
 function formatWhatsAppNumber(number) {
   const raw = String(number || "").split("@")[0].split(":")[0];
@@ -278,7 +280,7 @@ function channelIconClass(channel) {
 
 function channelDescription(channel) {
   return {
-    WhatsApp: "Use an already-bound WhatsApp agent from OpenClaw or Hermes.",
+    WhatsApp: "Bind WhatsApp to Hermes by generating a QR code, then scan it from WhatsApp.",
     Telegram: "Use an already-bound Telegram bot agent from OpenClaw or Hermes.",
     Mattermost: "Use an already-bound Mattermost bot/user agent from OpenClaw or Hermes.",
   }[channel] || "Choose the channel to add.";
@@ -302,12 +304,26 @@ function isVerified(channel) {
   );
 }
 
+function isWhatsappHermesSetup(channel) {
+  return Boolean(
+    channel?.channel === "WhatsApp" &&
+      channel.gateway_type === "Hermes" &&
+      currentIdentity(channel) &&
+      !channel.verification_error
+  );
+}
+
+function isWhatsappHermesDraftReady(channel) {
+  return Boolean(isWhatsappHermesSetup(channel) && channel._qr_onboarding);
+}
+
 function markUnverified(channel) {
   channel.enabled = false;
   channel.is_linked = false;
   channel.linked_identifier = "";
   channel._verified_identity = "";
   channel._verified_gateway_type = "";
+  channel._qr_onboarding = false;
   channel.verification_error = "";
 }
 
@@ -390,11 +406,21 @@ async function testChannel() {
     if (!resp.ok || !data.message?.ok) {
       throw new Error(getErrorMessage(data, "Channel test failed"));
     }
-    draftChannel.value.enabled = true;
-    draftChannel.value.is_linked = true;
-    draftChannel.value.linked_identifier = data.message.linked_identifier || currentIdentity(draftChannel.value);
-    draftChannel.value._verified_identity = draftChannel.value.linked_identifier;
-    draftChannel.value._verified_gateway_type = draftChannel.value.gateway_type;
+    if (data.message.is_linked === false || data.message.status === "pending_qr") {
+      draftChannel.value.enabled = false;
+      draftChannel.value.is_linked = false;
+      draftChannel.value.linked_identifier = "";
+      draftChannel.value._verified_identity = "";
+      draftChannel.value._verified_gateway_type = "";
+      draftChannel.value._qr_onboarding = true;
+    } else {
+      draftChannel.value.enabled = true;
+      draftChannel.value.is_linked = true;
+      draftChannel.value.linked_identifier = data.message.linked_identifier || currentIdentity(draftChannel.value);
+      draftChannel.value._verified_identity = draftChannel.value.linked_identifier;
+      draftChannel.value._verified_gateway_type = draftChannel.value.gateway_type;
+      draftChannel.value._qr_onboarding = false;
+    }
     draftChannel.value.verification_error = "";
     window.frappe?.show_alert?.({ message: data.message.message || "Channel verified", indicator: "green" });
   } catch (e) {
@@ -423,7 +449,11 @@ async function saveDraftChannel() {
   if (!canSaveDraft.value) return;
   isSaving.value = true;
   try {
-    await saveChannel({ ...draftChannel.value, enabled: true }, editMode.value ? "Channel record updated" : "Channel record added");
+    const shouldEnable = isVerified(draftChannel.value);
+    await saveChannel(
+      { ...draftChannel.value, enabled: shouldEnable, _qr_onboarding: isWhatsappHermesDraftReady(draftChannel.value) },
+      editMode.value ? "Channel record updated" : "Channel record added"
+    );
     cancelAddChannel();
     await fetchSettings();
   } catch (e) {
@@ -473,6 +503,14 @@ async function refreshWhatsappLinkStatus(showError = true) {
       throw new Error(getErrorMessage(data, "Failed to check WhatsApp link status"));
     }
     whatsappLink.value = { ...data.message, number: formatWhatsAppNumber(data.message?.number) };
+    const whatsappChannel = channels.value.find((channel) => channel.channel === "WhatsApp");
+    if (whatsappChannel) {
+      whatsappChannel.enabled = Boolean(data.message.is_linked);
+      whatsappChannel.is_linked = Boolean(data.message.is_linked);
+      whatsappChannel.linked_identifier = data.message.is_linked ? whatsappChannel.agent_name : "";
+      whatsappChannel._verified_identity = data.message.is_linked ? whatsappChannel.agent_name : "";
+      whatsappChannel._verified_gateway_type = data.message.is_linked ? whatsappChannel.gateway_type : "";
+    }
     if (whatsappLink.value.is_linked) {
       qrPanel.value = { qr_image: "", qr_data: "", message: "", error: false };
       stopWhatsappPolling();
